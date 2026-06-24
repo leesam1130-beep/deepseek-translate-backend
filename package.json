@@ -1,0 +1,22 @@
+{
+  "name": "deepseek-translate-backend",
+  "version": "1.0.0",
+  "description": "SemaTranslate WhatsApp translation backend — DeepSeek primary, OpenAI fallback",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "measure-tokens": "node scripts/measure-tokens.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.18.3"
+  },
+  "devDependencies": {
+    "gpt-tokenizer": "^3.4.0"
+  }
+}

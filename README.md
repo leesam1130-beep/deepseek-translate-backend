@@ -17,6 +17,29 @@ npm start
 
 访问 `http://localhost:3000/api/health` 应返回 `{"ok":true,"hasKey":true,"provider":"deepseek",...}`。
 
+## 与 SemaTranslate 扩展配对
+
+| 项目 | 路径（本机） |
+|---|---|
+| SemaTranslate 扩展 | `../SemaTranslate` |
+| 本后端 | 当前目录 `deepseek-translate-backend` |
+
+扩展 `config.js` 中的 `SEMA_BACKEND_BASE_URL` 必须等于 Railway **Public Domain**（无末尾斜杠）。配对说明见扩展目录 `BACKEND.md`。
+
+### 修改后部署
+
+```bash
+git add .
+git commit -m "fix: 描述改动"
+git push origin main
+```
+
+Railway 监听 `main` 分支自动 redeploy。部署完成后可用：
+
+```bash
+curl https://deepseek-translate-backend-production.up.railway.app/api/health
+```
+
 ## 部署到 Railway
 
 1. 推送本仓库到 GitHub

@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "start": "node server.js",
-    "measure-tokens": "node scripts/measure-tokens.mjs"
+    "measure-tokens": "node scripts/measure-tokens.mjs",
+    "check": "node --check server.js && node --check incoming-local.js"
   },
   "engines": {
     "node": ">=18"

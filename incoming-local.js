@@ -90,3 +90,28 @@ export function tryLocalIncomingTranslation(raw) {
 
   return null;
 }
+
+/** 本地/规则兜底（LLM 空译文或 batch 解析失败时使用，不消耗 tokens） */
+const SIMPLE_INCOMING = [
+  [/^(yes|yeah|yep|yup)\.?$/i, "是的"],
+  [/^(no|nope)\.?$/i, "不"],
+  [/^(ok|okay)\.?$/i, "好的"],
+  [/^(sawa|ndio|ndiyo)\.?$/i, "好的"],
+  [/^sawa\s+no\s+problem\.?$/i, "好的，没问题"],
+  [/^no\s+problem\.?$/i, "没问题"],
+  [/^(thanks?|thank\s+you)\.?$/i, "谢谢"],
+  [/^(hi|hello|hey)\.?$/i, "你好"],
+  [/^(good\s+morning)\.?$/i, "早上好"],
+  [/^(good\s+evening)\.?$/i, "晚上好"]
+];
+
+export function tryIncomingFallbackTranslation(raw) {
+  const local = tryLocalIncomingTranslation(raw);
+  if (local?.translation_cn) return local.translation_cn;
+  const norm = normalizeIncomingText(raw);
+  if (!norm) return "";
+  for (const [re, zh] of SIMPLE_INCOMING) {
+    if (re.test(norm)) return zh;
+  }
+  return "";
+}

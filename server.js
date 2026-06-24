@@ -28,7 +28,7 @@ import cors from "cors";
 import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
-import { tryLocalIncomingTranslation } from "./incoming-local.js";
+import { tryLocalIncomingTranslation, tryIncomingFallbackTranslation } from "./incoming-local.js";
 import {
   recordUserUsage,
   checkUserQuota,
@@ -622,6 +622,65 @@ function resolveProviderModel(requestedModel, route) {
     return { provider: "deepseek", model: DEEPSEEK_DEFAULT_MODEL };
   }
   return { provider: "openai", model: enforceModelPolicy(requestedModel, route) };
+}
+
+async function translateOneIncomingLLM(text) {
+  const { provider, model } = resolveProviderModel(null, "/api/batch-translate-incoming");
+  const { text: raw } = await callTranslateAPI({
+    provider,
+    model,
+    instructions:
+      "Translate ONE WhatsApp customer message (Swahili/English/French, Dar es Salaam business chat) " +
+      'to Simplified Chinese. Return JSON only: {"translation_cn":"..."}. Never return empty unless input is already Chinese.',
+    input: String(text || "").trim(),
+    jsonSchema: {
+      name: "single_incoming_zh",
+      strict: true,
+      schema: {
+        type: "object",
+        properties: { translation_cn: { type: "string" } },
+        required: ["translation_cn"],
+        additionalProperties: false
+      }
+    },
+    temperature: 0.2,
+    maxOutputTokens: 320,
+    timeoutMs: 45000
+  });
+  let parsed = null;
+  try { parsed = JSON.parse(raw); } catch (_) {}
+  const zh = String(parsed?.translation_cn || extractJsonStringField(raw, "translation_cn") || "").trim();
+  return zh;
+}
+
+function parseBatchLlmItems(parsed, rawText, llmItems) {
+  const collected = [];
+  const arrays = [parsed?.items, parsed?.translations, parsed?.results].filter(Array.isArray);
+  for (const arr of arrays) {
+    for (const t of arr) {
+      if (!t || typeof t !== "object") continue;
+      const zh = String(t.translation_cn || t.translation || t.zh || "").trim();
+      if (t.id != null) collected.push({ id: String(t.id), translation_cn: zh });
+      else if (zh) collected.push({ translation_cn: zh });
+    }
+  }
+  if (parsed?.translation_cn && llmItems.length === 1) {
+    collected.push({ id: llmItems[0].id, translation_cn: String(parsed.translation_cn).trim() });
+  }
+  if (!collected.length && llmItems.length === 1) {
+    const zh = extractJsonStringField(rawText, "translation_cn");
+    if (zh) collected.push({ id: llmItems[0].id, translation_cn: zh });
+  }
+  return collected;
+}
+
+function mapLlmItemsById(llmList, llmItems) {
+  const byId = new Map();
+  llmList.forEach((t, i) => {
+    if (t?.id) byId.set(String(t.id), t);
+    else if (llmItems[i]) byId.set(llmItems[i].id, { ...t, id: llmItems[i].id });
+  });
+  return byId;
 }
 
 async function callTranslateAPI({ provider, model, ...rest }) {
@@ -1245,7 +1304,9 @@ app.post("/api/batch-translate-incoming", requireUser, requireQuota, async (req,
       if (!subItems.length) {
         return { items: [], usage: null, provider: pv, modelUsed: m, providerFallback: false, primaryError: null };
       }
-      const subLines = subItems.map((it) => `[${it.id}]\n${String(it.text || "").trim()}`);
+      const subLines = subItems.map((it, i) =>
+        `--- ITEM ${i + 1} ---\nid: ${it.id}\ntext: ${String(it.text || "").trim()}`
+      );
       const glossarySource = [
         ...subItems.map((it) => String(it.text || "")),
         ...recentContext
@@ -1254,7 +1315,11 @@ app.post("/api/batch-translate-incoming", requireUser, requireQuota, async (req,
         findGlossaryMatches(glossarySource),
         "foreign-to-cn"
       );
-      const subInput = `${glossaryBlock}${contextBlock}ITEMS TO TRANSLATE:\n${subLines.join("\n\n")}`;
+      const subInput =
+        `${glossaryBlock}${contextBlock}` +
+        `Translate EACH item below to Simplified Chinese.\n` +
+        `Return JSON only: {"items":[{"id":"<copy id exactly>","translation_cn":"..."}]}\n\n` +
+        subLines.join("\n\n");
       const {
         text,
         usage,
@@ -1299,8 +1364,15 @@ app.post("/api/batch-translate-incoming", requireUser, requireQuota, async (req,
         console.error(`[batch] BAD_JSON_FROM_MODEL preview: ${JSON.stringify(preview)}`);
         throw new Error("BAD_JSON_FROM_MODEL: " + (err?.message || String(err)));
       }
+      const llmList = parseBatchLlmItems(parsed, text, subItems);
+      if (!llmList.length && (parsed?.items?.length || 0) === 0) {
+        console.warn(
+          `[batch] empty items from model provider=${usedProvider} model=${modelUsed} ` +
+          `preview=${JSON.stringify((text || "").slice(0, 400))}`
+        );
+      }
       return {
-        items: Array.isArray(parsed?.items) ? parsed.items : [],
+        items: llmList,
         usage,
         provider: usedProvider,
         modelUsed,
@@ -1310,7 +1382,7 @@ app.post("/api/batch-translate-incoming", requireUser, requireQuota, async (req,
     }
 
     const {
-      items: rawTranslations,
+      items: llmList,
       usage,
       provider: usedProvider,
       modelUsed,
@@ -1318,32 +1390,47 @@ app.post("/api/batch-translate-incoming", requireUser, requireQuota, async (req,
       primaryError
     } = await callBatchOnce({ provider: chosenProvider, model, items: llmItems });
 
-    const llmById = new Map(
-      (Array.isArray(rawTranslations) ? rawTranslations : []).map((t) => [t.id, t])
-    );
+    const llmById = mapLlmItemsById(llmList, llmItems);
 
-    const translations = items.map((it) => {
+    const translations = [];
+    for (const it of items) {
       const local = localById.get(it.id);
       if (local) {
-        return {
+        translations.push({
           id: it.id,
           translation_cn: local.translation_cn,
           intent: "other",
           secondary_intents: [],
           confidence: "high",
           translation_source: local.source
-        };
+        });
+        continue;
       }
-      const t = llmById.get(it.id);
-      return {
+      const idx = llmItems.indexOf(it);
+      const t = llmById.get(it.id) || (idx >= 0 ? llmList[idx] : null);
+      let zh = String(t?.translation_cn || "").trim();
+      let source = "llm";
+      if (!zh) {
+        zh = tryIncomingFallbackTranslation(it.text);
+        if (zh) source = "local-fallback";
+      }
+      if (!zh && llmItems.includes(it)) {
+        try {
+          zh = await translateOneIncomingLLM(it.text);
+          if (zh) source = "single-llm";
+        } catch (err) {
+          console.warn(`[batch] single-llm fallback failed id=${it.id}:`, err?.message || err);
+        }
+      }
+      translations.push({
         id: it.id,
-        translation_cn: t?.translation_cn || "",
+        translation_cn: zh,
         intent: "other",
         secondary_intents: [],
-        confidence: "medium",
-        translation_source: "llm"
-      };
-    });
+        confidence: zh ? (source === "llm" ? "medium" : "high") : "low",
+        translation_source: source
+      });
+    }
 
     if (req._user && usage) {
       recordUserUsage(req._user, {

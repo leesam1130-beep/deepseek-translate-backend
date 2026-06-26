@@ -91,7 +91,6 @@ export function recordUserUsage(user, { route, usage, provider, model }) {
   const pt = usage?.input_tokens ?? usage?.prompt_tokens ?? 0;
   const ct = usage?.output_tokens ?? usage?.completion_tokens ?? 0;
   const tt = usage?.total_tokens ?? pt + ct;
-  if (tt <= 0) return;
 
   const month = currentMonthKey();
   const store = loadStore();
@@ -100,17 +99,20 @@ export function recordUserUsage(user, { route, usage, provider, model }) {
   if (!store.months[month][user]) store.months[month][user] = emptyUserStats();
 
   const u = store.months[month][user];
-  u.totalTokens += tt;
-  u.inputTokens += pt;
-  u.outputTokens += ct;
   u.requests += 1;
   if (!u.byRoute[route]) {
     u.byRoute[route] = { requests: 0, totalTokens: 0 };
   }
   u.byRoute[route].requests += 1;
-  u.byRoute[route].totalTokens += tt;
-  u.lastProvider = provider;
-  u.lastModel = model;
+
+  if (tt > 0) {
+    u.totalTokens += tt;
+    u.inputTokens += pt;
+    u.outputTokens += ct;
+    u.byRoute[route].totalTokens += tt;
+  }
+  if (provider) u.lastProvider = provider;
+  if (model) u.lastModel = model;
   u.updatedAt = new Date().toISOString();
 
   saveStore(store);

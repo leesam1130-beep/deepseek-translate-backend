@@ -33,6 +33,20 @@ function getAdminUser() {
   return localStorage.getItem(STORAGE_ADMIN_USER)?.trim() || "";
 }
 
+function friendlyApiError(data) {
+  const hint = data.hint ? `（${data.hint}）` : "";
+  if (data.error === "ADMIN_REQUIRED") {
+    return `需要管理员身份${hint}`;
+  }
+  if (data.error === "USERNAME_REQUIRED") {
+    return `缺少用户名${hint}`;
+  }
+  return `${data.error || "请求失败"}${hint}`;
+}
+
+const EMPTY_HINT =
+  "暂无用量数据。常见原因：① Chrome 扩展「设置 → 用户名」未填写（之前未填名的请求不会被统计）；② 后端刚重新部署，Railway 未挂持久化卷时历史会清空。填好用户名后再翻译几次即可出现。";
+
 function showStatus(message, type = "error") {
   const bar = $("#statusBar");
   bar.textContent = message;
@@ -66,8 +80,7 @@ async function fetchUsage(month) {
   const data = await res.json().catch(() => ({}));
 
   if (!res.ok) {
-    const hint = data.hint ? ` ${data.hint}` : "";
-    throw new Error(`${data.error || res.statusText}${hint}`);
+    throw new Error(friendlyApiError(data));
   }
   if (!data.ok) {
     throw new Error(data.error || "请求失败");
@@ -143,8 +156,7 @@ function renderTable(users) {
   const sorted = sortUsers(filtered);
 
   if (!sorted.length) {
-    $("#userTableBody").innerHTML =
-      '<tr><td colspan="9" class="empty">暂无数据。用户开始翻译后会出现在这里。</td></tr>';
+    $("#userTableBody").innerHTML = `<tr><td colspan="9" class="empty">${EMPTY_HINT}</td></tr>`;
     return;
   }
 
@@ -213,6 +225,8 @@ function initSettings() {
 
   if (!localStorage.getItem(STORAGE_BACKEND) && !location.pathname.startsWith("/admin")) {
     $("#settingsPanel").classList.remove("hidden");
+  } else if (!getAdminUser()) {
+    showStatus("提示：若 Railway 设置了 SEMA_ADMIN_USERS，请在「连接设置」填写相同的管理员用户名。", "success");
   }
 }
 

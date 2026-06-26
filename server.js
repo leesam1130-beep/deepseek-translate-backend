@@ -379,6 +379,16 @@ function getReqUser(req) {
   return String(req.get("x-sema-user") || req.get("x-gwell-user") || "").trim();
 }
 
+/** 未传用户名时，在未启用白名单的情况下归入默认用户，便于管理台统计 */
+const DEFAULT_USAGE_USER = String(process.env.SEMA_DEFAULT_USER || "_default").trim() || "_default";
+
+function resolveUsageUser(req) {
+  const user = getReqUser(req);
+  if (user) return user;
+  if (!AUTH_ENABLED) return DEFAULT_USAGE_USER;
+  return null;
+}
+
 function requireUser(req, res, next) {
   const user = getReqUser(req);
   req._user = user || null;
@@ -1081,7 +1091,10 @@ function requireAdmin(req, res, next) {
     .filter(Boolean);
   const user = req._user;
   if (adminUsers.length > 0 && !adminUsers.includes(user)) {
-    return res.status(403).json({ ok: false, error: "ADMIN_REQUIRED", hint: "当前用户不在 SEMA_ADMIN_USERS 中" });
+    const hint = !user
+      ? "请在管理页「连接设置」填写与 Railway 变量 SEMA_ADMIN_USERS 一致的管理员用户名"
+      : `当前用户「${user}」不在 SEMA_ADMIN_USERS 中`;
+    return res.status(403).json({ ok: false, error: "ADMIN_REQUIRED", hint });
   }
   next();
 }
@@ -1230,10 +1243,11 @@ app.post("/api/translate", requireUser, requireQuota, async (req, res) => {
         }
       } : {};
 
-    if (req._user && usage) {
-      recordUserUsage(req._user, {
+    const usageUser = resolveUsageUser(req);
+    if (usageUser) {
+      recordUserUsage(usageUser, {
         route: "/api/translate",
-        usage,
+        usage: usage || {},
         provider: usedProvider,
         model: modelUsed
       });
@@ -1457,10 +1471,11 @@ app.post("/api/batch-translate-incoming", requireUser, requireQuota, async (req,
       });
     }
 
-    if (req._user && usage) {
-      recordUserUsage(req._user, {
+    const usageUser = resolveUsageUser(req);
+    if (usageUser) {
+      recordUserUsage(usageUser, {
         route: "/api/batch-translate-incoming",
-        usage,
+        usage: usage || {},
         provider: usedProvider,
         model: modelUsed
       });

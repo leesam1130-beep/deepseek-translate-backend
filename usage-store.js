@@ -11,6 +11,7 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
+import { computeCostFromUsage, computeUsageCost } from "./pricing.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -108,9 +109,24 @@ function emptyUserStats() {
     totalTokens: 0,
     inputTokens: 0,
     outputTokens: 0,
+    inputCacheHitTokens: 0,
+    inputCacheMissTokens: 0,
+    costCny: 0,
     requests: 0,
     byRoute: {}
   };
+}
+
+function resolveRowCost(stats) {
+  if (typeof stats.costCny === "number" && stats.costCny > 0) return stats.costCny;
+  const hit = stats.inputCacheHitTokens || 0;
+  const miss = stats.inputCacheMissTokens ?? (stats.inputTokens || 0);
+  return computeUsageCost({
+    inputCacheHitTokens: hit,
+    inputCacheMissTokens: miss,
+    outputTokens: stats.outputTokens || 0,
+    provider: stats.lastProvider || "deepseek"
+  });
 }
 
 /** Panel override > env > unlimited */
@@ -150,6 +166,7 @@ function enrichUserRow(user, stats, month) {
     user,
     month,
     ...stats,
+    costCny: resolveRowCost(stats),
     quota,
     unlimited: quotaInfo.unlimited,
     quotaSource: quotaInfo.source,
@@ -169,9 +186,8 @@ export function getUserUsage(user) {
 
 export function recordUserUsage(user, { route, usage, provider, model }) {
   if (!user) return;
-  const pt = usage?.input_tokens ?? usage?.prompt_tokens ?? 0;
-  const ct = usage?.output_tokens ?? usage?.completion_tokens ?? 0;
-  const tt = usage?.total_tokens ?? pt + ct;
+  const billed = computeCostFromUsage(usage || {}, provider || "deepseek");
+  const { inputTokens, outputTokens, inputCacheHitTokens, inputCacheMissTokens, totalTokens, costCny } = billed;
 
   const month = currentMonthKey();
   const store = loadStore();
@@ -182,15 +198,19 @@ export function recordUserUsage(user, { route, usage, provider, model }) {
   const u = store.months[month][user];
   u.requests += 1;
   if (!u.byRoute[route]) {
-    u.byRoute[route] = { requests: 0, totalTokens: 0 };
+    u.byRoute[route] = { requests: 0, totalTokens: 0, costCny: 0 };
   }
   u.byRoute[route].requests += 1;
 
-  if (tt > 0) {
-    u.totalTokens += tt;
-    u.inputTokens += pt;
-    u.outputTokens += ct;
-    u.byRoute[route].totalTokens += tt;
+  if (totalTokens > 0 || costCny > 0) {
+    u.totalTokens += totalTokens;
+    u.inputTokens += inputTokens;
+    u.outputTokens += outputTokens;
+    u.inputCacheHitTokens = (u.inputCacheHitTokens || 0) + inputCacheHitTokens;
+    u.inputCacheMissTokens = (u.inputCacheMissTokens || 0) + inputCacheMissTokens;
+    u.costCny = (u.costCny || 0) + costCny;
+    u.byRoute[route].totalTokens += totalTokens;
+    u.byRoute[route].costCny = (u.byRoute[route].costCny || 0) + costCny;
   }
   if (provider) u.lastProvider = provider;
   if (model) u.lastModel = model;
@@ -240,11 +260,23 @@ export function getUsageOverview({ month = currentMonthKey() } = {}) {
       acc.totalTokens += u.totalTokens || 0;
       acc.inputTokens += u.inputTokens || 0;
       acc.outputTokens += u.outputTokens || 0;
+      acc.inputCacheHitTokens += u.inputCacheHitTokens || 0;
+      acc.inputCacheMissTokens += u.inputCacheMissTokens || 0;
       acc.requests += u.requests || 0;
+      acc.costCny += u.costCny || 0;
       return acc;
     },
-    { totalTokens: 0, inputTokens: 0, outputTokens: 0, requests: 0 }
+    {
+      totalTokens: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      inputCacheHitTokens: 0,
+      inputCacheMissTokens: 0,
+      requests: 0,
+      costCny: 0
+    }
   );
+  totals.costCny = Math.round(totals.costCny * 1_000_000) / 1_000_000;
   return {
     month,
     userCount: users.length,

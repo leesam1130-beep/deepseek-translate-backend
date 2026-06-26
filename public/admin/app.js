@@ -8,10 +8,16 @@ let sortKey = "totalTokens";
 let sortDir = "desc";
 let selectedMonth = "";
 let editingUser = null;
+let pricingInfo = null;
 
 function fmt(n) {
   if (n == null || n === "") return "—";
   return Number(n).toLocaleString("zh-CN");
+}
+
+function fmtMoney(n) {
+  if (n == null || n === "" || !Number(n)) return "¥0.00";
+  return `¥${Number(n).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`;
 }
 
 function fmtTime(iso) {
@@ -111,23 +117,36 @@ async function resetUsage(user, month) {
 
 function renderSummary(overview) {
   const cards = [
-    { label: "用户数", value: overview.userCount },
-    { label: "活跃用户", value: overview.activeUserCount },
-    { label: "白名单", value: overview.whitelistedCount ?? "—" },
-    { label: "总请求", value: overview.requests },
-    { label: "总 Token", value: overview.totalTokens },
-    { label: "输出 Token", value: overview.outputTokens }
+    { label: "总费用", value: fmtMoney(overview.costCny), isMoney: true },
+    { label: "用户数", value: fmt(overview.userCount) },
+    { label: "活跃用户", value: fmt(overview.activeUserCount) },
+    { label: "总请求", value: fmt(overview.requests) },
+    { label: "总 Token", value: fmt(overview.totalTokens) },
+    { label: "输入命中", value: fmt(overview.inputCacheHitTokens) },
+    { label: "输入未命中", value: fmt(overview.inputCacheMissTokens) },
+    { label: "输出 Token", value: fmt(overview.outputTokens) }
   ];
 
   $("#summaryCards").innerHTML = cards
     .map(
       (c) => `
-      <div class="card">
+      <div class="card${c.isMoney ? " card-money" : ""}">
         <div class="card-label">${c.label}</div>
-        <div class="card-value">${fmt(c.value)}</div>
+        <div class="card-value">${c.value}</div>
       </div>`
     )
     .join("");
+}
+
+function renderPricingHint(pricing) {
+  const el = $("#pricingHint");
+  if (!pricing?.deepseek) {
+    el.textContent = "";
+    return;
+  }
+  const d = pricing.deepseek;
+  el.textContent =
+    `${pricing.modelLabel || "DeepSeek"}：输入命中 ¥${d.inputHitPerM}/M · 未命中 ¥${d.inputMissPerM}/M · 输出 ¥${d.outputPerM}/M`;
 }
 
 function quotaPercent(user) {
@@ -190,7 +209,7 @@ function renderTable(users) {
   const sorted = sortUsers(filtered);
 
   if (!sorted.length) {
-    $("#userTableBody").innerHTML = `<tr><td colspan="10" class="empty">${EMPTY_HINT}</td></tr>`;
+    $("#userTableBody").innerHTML = `<tr><td colspan="11" class="empty">${EMPTY_HINT}</td></tr>`;
     return;
   }
 
@@ -208,6 +227,7 @@ function renderTable(users) {
         <td class="num">${fmt(u.inputTokens)}</td>
         <td class="num">${fmt(u.outputTokens)}</td>
         <td class="num">${fmt(u.totalTokens)}</td>
+        <td class="num cost-cell">${fmtMoney(u.costCny)}</td>
         <td class="num">${renderQuotaDisplay(u)}</td>
         <td>${renderQuotaCell(u)}</td>
         <td>${renderRouteTags(u.byRoute)}</td>
@@ -243,21 +263,23 @@ function fillMonthSelect(availableMonths, current) {
 
 async function loadData() {
   hideStatus();
-  $("#userTableBody").innerHTML = '<tr><td colspan="10" class="empty">正在加载…</td></tr>';
+  $("#userTableBody").innerHTML = '<tr><td colspan="11" class="empty">正在加载…</td></tr>';
 
   try {
     const month = $("#selectMonth").value || selectedMonth || currentMonthKey();
     const data = await fetchUsage(month);
     allUsers = data.users || [];
+    pricingInfo = data.pricing || null;
     selectedMonth = data.month;
     fillMonthSelect(data.availableMonths || [], data.month);
     renderSummary(data.overview || {});
+    renderPricingHint(pricingInfo);
     renderTable(allUsers);
     $("#lastUpdated").textContent = `更新于 ${new Date().toLocaleString("zh-CN", { hour12: false })}`;
   } catch (err) {
     showStatus(err.message || String(err), "error");
     $("#summaryCards").innerHTML = "";
-    $("#userTableBody").innerHTML = `<tr><td colspan="10" class="empty">${escapeHtml(err.message)}</td></tr>`;
+    $("#userTableBody").innerHTML = `<tr><td colspan="11" class="empty">${escapeHtml(err.message)}</td></tr>`;
   }
 }
 

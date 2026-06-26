@@ -42,6 +42,7 @@ import {
   clearUserQuotaOverride,
   getUserQuotaInfo
 } from "./usage-store.js";
+import { PRICING_META } from "./pricing.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -595,7 +596,9 @@ async function callDeepSeekChat({
         output_tokens: data.usage.completion_tokens || 0,
         total_tokens: data.usage.total_tokens || 0,
         prompt_tokens: data.usage.prompt_tokens || 0,
-        completion_tokens: data.usage.completion_tokens || 0
+        completion_tokens: data.usage.completion_tokens || 0,
+        prompt_cache_hit_tokens: data.usage.prompt_cache_hit_tokens || 0,
+        prompt_cache_miss_tokens: data.usage.prompt_cache_miss_tokens || 0
       }
     : null;
 
@@ -1123,7 +1126,15 @@ app.get("/api/admin/usage", requireUser, requireAdmin, (req, res) => {
       requests: overview.requests
     },
     users: overview.users,
-    availableMonths: listAvailableMonths()
+    availableMonths: listAvailableMonths(),
+    pricing: {
+      currency: PRICING_META.currency,
+      symbol: PRICING_META.symbol,
+      modelLabel: PRICING_META.modelLabel,
+      deepseek: PRICING_META.deepseek,
+      openai: PRICING_META.openai,
+      note: "DeepSeek 按缓存命中/未命中分别计价；历史无缓存明细时按「全部未命中」估算"
+    }
   });
 });
 

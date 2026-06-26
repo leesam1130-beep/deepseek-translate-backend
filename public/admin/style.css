@@ -193,6 +193,14 @@ select:focus {
   font-size: 0.82rem;
 }
 
+.pricing-hint {
+  color: var(--muted);
+  font-size: 0.78rem;
+  max-width: 420px;
+  text-align: right;
+  line-height: 1.4;
+}
+
 .summary-cards {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -217,6 +225,15 @@ select:focus {
   font-size: 1.45rem;
   font-weight: 650;
   font-variant-numeric: tabular-nums;
+}
+
+.card-money .card-value {
+  color: #86efac;
+}
+
+.cost-cell {
+  color: #86efac;
+  font-weight: 600;
 }
 
 .table-section {

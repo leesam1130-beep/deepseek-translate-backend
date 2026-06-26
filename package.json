@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node server.js",
     "measure-tokens": "node scripts/measure-tokens.mjs",
-    "check": "node --check server.js && node --check incoming-local.js"
+    "check": "node --check server.js && node --check incoming-local.js && node --check usage-store.js && node --check pricing.js"
   },
   "engines": {
     "node": ">=18"

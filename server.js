@@ -33,7 +33,8 @@ import {
   recordUserUsage,
   checkUserQuota,
   getUserUsage,
-  listAllUsage
+  getUsageOverview,
+  listAvailableMonths
 } from "./usage-store.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -43,6 +44,9 @@ const app = express();
 
 app.use(cors());
 app.use(express.json({ limit: "1mb" }));
+const adminDir = join(__dirname, "public", "admin");
+app.use("/admin", express.static(adminDir, { index: "index.html" }));
+app.get("/admin", (_req, res) => res.redirect(301, "/admin/"));
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const OPENAI_BASE_URL = (process.env.OPENAI_BASE_URL || "https://api.openai.com/v1").replace(/\/+$/, "");
@@ -1070,14 +1074,35 @@ app.get("/api/usage", requireUser, (req, res) => {
   res.json({ ok: true, usage: getUserUsage(user) });
 });
 
-app.get("/api/admin/usage", requireUser, (req, res) => {
-  const adminUsers = String(process.env.SEMA_ADMIN_USERS || "").split(",").map((s) => s.trim()).filter(Boolean);
+function requireAdmin(req, res, next) {
+  const adminUsers = String(process.env.SEMA_ADMIN_USERS || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
   const user = req._user;
   if (adminUsers.length > 0 && !adminUsers.includes(user)) {
-    return res.status(403).json({ ok: false, error: "ADMIN_REQUIRED" });
+    return res.status(403).json({ ok: false, error: "ADMIN_REQUIRED", hint: "当前用户不在 SEMA_ADMIN_USERS 中" });
   }
+  next();
+}
+
+app.get("/api/admin/usage", requireUser, requireAdmin, (req, res) => {
   const month = String(req.query.month || "").trim() || undefined;
-  res.json({ ok: true, month: month || "current", users: listAllUsage({ month }) });
+  const overview = getUsageOverview({ month });
+  res.json({
+    ok: true,
+    month: overview.month,
+    overview: {
+      userCount: overview.userCount,
+      activeUserCount: overview.activeUserCount,
+      totalTokens: overview.totalTokens,
+      inputTokens: overview.inputTokens,
+      outputTokens: overview.outputTokens,
+      requests: overview.requests
+    },
+    users: overview.users,
+    availableMonths: listAvailableMonths()
+  });
 });
 
 // === 主路由 1：outbound 中→客户语言 ===

@@ -134,12 +134,43 @@ export function checkUserQuota(user) {
 export function listAllUsage({ month = currentMonthKey() } = {}) {
   const store = loadStore();
   const monthData = store.months?.[month] || {};
-  return Object.entries(monthData).map(([user, stats]) => ({
-    user,
+  return Object.entries(monthData).map(([user, stats]) => {
+    const quota = getUserQuota(user);
+    return {
+      user,
+      month,
+      ...stats,
+      quota: quota || null,
+      remaining: quota > 0 ? Math.max(0, quota - stats.totalTokens) : null,
+      quotaExceeded: quota > 0 && stats.totalTokens >= quota
+    };
+  });
+}
+
+export function getUsageOverview({ month = currentMonthKey() } = {}) {
+  const users = listAllUsage({ month });
+  const totals = users.reduce(
+    (acc, u) => {
+      acc.totalTokens += u.totalTokens || 0;
+      acc.inputTokens += u.inputTokens || 0;
+      acc.outputTokens += u.outputTokens || 0;
+      acc.requests += u.requests || 0;
+      return acc;
+    },
+    { totalTokens: 0, inputTokens: 0, outputTokens: 0, requests: 0 }
+  );
+  return {
     month,
-    ...stats,
-    quota: getUserQuota(user) || null
-  }));
+    userCount: users.length,
+    activeUserCount: users.filter((u) => (u.requests || 0) > 0).length,
+    ...totals,
+    users: users.sort((a, b) => (b.totalTokens || 0) - (a.totalTokens || 0))
+  };
+}
+
+export function listAvailableMonths() {
+  const store = loadStore();
+  return Object.keys(store.months || {}).sort().reverse();
 }
 
 if (USER_QUOTAS.size > 0) {

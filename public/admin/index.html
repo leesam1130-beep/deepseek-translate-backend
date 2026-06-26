@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SemaTranslate 用量管理</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="layout">
+    <header class="header">
+      <div class="header-left">
+        <h1>SemaTranslate 用量管理</h1>
+        <p class="subtitle">查看每个用户的 Token 用量与配额</p>
+      </div>
+      <div class="header-actions">
+        <button type="button" id="btnRefresh" class="btn btn-primary">刷新</button>
+        <button type="button" id="btnSettings" class="btn btn-ghost">连接设置</button>
+      </div>
+    </header>
+
+    <section id="settingsPanel" class="settings-panel hidden">
+      <h2>连接设置</h2>
+      <div class="form-grid">
+        <label>
+          后端地址
+          <input id="inputBackend" type="url" placeholder="https://your-backend.railway.app" />
+        </label>
+        <label>
+          管理员用户名
+          <input id="inputAdminUser" type="text" placeholder="与 SEMA_ADMIN_USERS 中一致" />
+        </label>
+      </div>
+      <p class="hint">
+        请求头会带上 <code>X-SEMA-User</code>。Railway 需设置
+        <code>SEMA_ADMIN_USERS=你的用户名</code>。若从 <code>/admin</code> 打开可留空后端地址。
+      </p>
+      <div class="settings-actions">
+        <button type="button" id="btnSaveSettings" class="btn btn-primary">保存并加载</button>
+        <button type="button" id="btnCloseSettings" class="btn btn-ghost">关闭</button>
+      </div>
+    </section>
+
+    <section id="statusBar" class="status-bar hidden"></section>
+
+    <section class="toolbar">
+      <label class="month-picker">
+        月份
+        <select id="selectMonth"></select>
+      </label>
+      <span id="lastUpdated" class="last-updated"></span>
+    </section>
+
+    <section id="summaryCards" class="summary-cards"></section>
+
+    <section class="table-section">
+      <div class="table-header">
+        <h2>用户用量明细</h2>
+        <input id="inputSearch" type="search" placeholder="搜索用户名…" />
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th data-sort="user">用户</th>
+              <th data-sort="requests" class="num">请求数</th>
+              <th data-sort="inputTokens" class="num">输入 Token</th>
+              <th data-sort="outputTokens" class="num">输出 Token</th>
+              <th data-sort="totalTokens" class="num">总 Token</th>
+              <th data-sort="quota" class="num">配额</th>
+              <th>用量</th>
+              <th>路由分布</th>
+              <th>最近更新</th>
+            </tr>
+          </thead>
+          <tbody id="userTableBody">
+            <tr><td colspan="9" class="empty">正在加载…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

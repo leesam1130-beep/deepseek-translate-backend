@@ -52,6 +52,11 @@ curl https://deepseek-translate-backend-production.up.railway.app/api/health
    - `SEMA_USER_QUOTAS` = `alice:500000,bob:200000`（可选，月度 token 配额）
 4. Generate Domain 拿到公网 URL
 5. 把 URL 填到 SemaTranslate 扩展的 `config.js`
+6. **（推荐）挂载持久化卷**，避免 redeploy 清空用量 — 见 [RAILWAY-VOLUME.md](./RAILWAY-VOLUME.md)
+
+### Web 管理台
+
+部署后访问 `https://你的域名/admin/`，需设置 `SEMA_ADMIN_USERS`。
 
 ## API
 
@@ -72,6 +77,7 @@ curl https://deepseek-translate-backend-production.up.railway.app/api/health
 ### 用户用量 / 配额
 
 - 每次翻译自动累计 token 到 `data/usage.json`（按月分桶）
+- Railway 生产环境请挂载 Volume 到 `/app/data`，详见 [RAILWAY-VOLUME.md](./RAILWAY-VOLUME.md)
 - `SEMA_USER_QUOTAS` 设置月度上限，超额返回 `429 QUOTA_EXCEEDED`
 - 后续可迁移到数据库，接口不变
 

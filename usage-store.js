@@ -12,8 +12,26 @@ import { fileURLToPath } from "url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-const USAGE_DIR = process.env.SEMA_USAGE_DIR || join(__dirname, "data");
+function resolveUsageDir() {
+  const explicit = String(process.env.SEMA_USAGE_DIR || "").trim();
+  if (explicit) return explicit;
+  const railwayMount = String(process.env.RAILWAY_VOLUME_MOUNT_PATH || "").trim();
+  if (railwayMount) return railwayMount;
+  return join(__dirname, "data");
+}
+
+const USAGE_DIR = resolveUsageDir();
 const USAGE_FILE = join(USAGE_DIR, "usage.json");
+
+export function getUsageStorageInfo() {
+  return {
+    dir: USAGE_DIR,
+    file: USAGE_FILE,
+    persistent: !!process.env.RAILWAY_VOLUME_MOUNT_PATH || !!process.env.SEMA_USAGE_DIR,
+    volumeMounted: !!process.env.RAILWAY_VOLUME_MOUNT_PATH,
+    volumeName: process.env.RAILWAY_VOLUME_NAME || null
+  };
+}
 
 function currentMonthKey() {
   const d = new Date();
@@ -178,3 +196,9 @@ export function listAvailableMonths() {
 if (USER_QUOTAS.size > 0) {
   console.log(`[sema-backend] user quotas enabled for ${USER_QUOTAS.size} user(s)`);
 }
+
+const storage = getUsageStorageInfo();
+console.log(
+  `[sema-backend] usage storage: ${storage.dir}` +
+    (storage.volumeMounted ? ` (Railway volume: ${storage.volumeName || "attached"})` : " (local/ephemeral — attach a Railway volume at /app/data for persistence)")
+);

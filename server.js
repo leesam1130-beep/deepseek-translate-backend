@@ -34,7 +34,8 @@ import {
   checkUserQuota,
   getUserUsage,
   getUsageOverview,
-  listAvailableMonths
+  listAvailableMonths,
+  getUsageStorageInfo
 } from "./usage-store.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -1051,6 +1052,7 @@ app.get("/api/health", (req, res) => {
 
   const providerInfo = buildHealthProviderInfo();
   const usage = user ? getUserUsage(user) : null;
+  const usageStorage = getUsageStorageInfo();
 
   res.json({
     ok: true,
@@ -1072,6 +1074,7 @@ app.get("/api/health", (req, res) => {
     buildVersion: process.env.RAILWAY_GIT_COMMIT_SHA || "unknown",
     promptVersion: "sema-translate-v1",
     usage,
+    usageStorage,
     ...providerInfo
   });
 });

@@ -52,7 +52,9 @@ function adminHeaders(json = false) {
 
 function friendlyApiError(data) {
   const hint = data.hint ? `（${data.hint}）` : "";
-  if (data.error === "ADMIN_REQUIRED") return `需要管理员身份${hint}`;
+  if (data.error === "ADMIN_REQUIRED") {
+    return `需要管理员身份${hint}。请点击「连接设置」填写与 Railway 变量 SEMA_ADMIN_USERS 一致的用户名。`;
+  }
   if (data.error === "USERNAME_REQUIRED") return `缺少用户名${hint}`;
   return `${data.error || "请求失败"}${hint}`;
 }
@@ -182,6 +184,8 @@ function renderQuotaCell(user) {
       ${pct}%${note}
     </div>`;
 }
+
+function quotaSourceLabel(source) {
   if (source === "panel") return '<span class="badge badge-info">面板</span>';
   if (source === "env") return '<span class="badge badge-warn">环境变量</span>';
   return "";
@@ -195,19 +199,6 @@ function renderRouteTags(byRoute) {
       return `<span class="route-tag" title="${route}">${short}: ${fmt(info.totalTokens)}</span>`;
     })
     .join("")}</div>`;
-}
-
-function renderQuotaCell(user) {
-  if (user.unlimited) return '<span class="badge badge-muted">无限制</span>';
-  const pct = quotaPercent(user);
-  if (pct == null) return "—";
-  const cls = pct >= 100 ? "over" : pct >= 80 ? "warn" : "";
-  const note = periodMode === "day" ? '<span class="badge badge-muted" title="配额按整月计算">月</span>' : "";
-  return `
-    <div>
-      <span class="quota-bar"><span class="quota-bar-fill ${cls}" style="width:${pct}%"></span></span>
-      ${pct}% ${note}
-    </div>`;
 }
 
 function renderQuotaDisplay(user) {
@@ -469,8 +460,11 @@ function initSettings() {
 
   if (!localStorage.getItem(STORAGE_BACKEND) && !location.pathname.startsWith("/admin")) {
     $("#settingsPanel").classList.remove("hidden");
-  } else if (!getAdminUser()) {
-    showStatus("提示：若 Railway 设置了 SEMA_ADMIN_USERS，请在「连接设置」填写相同的管理员用户名。", "success");
+  }
+
+  if (!getAdminUser()) {
+    $("#settingsPanel").classList.remove("hidden");
+    showStatus("请先在「连接设置」填写管理员用户名（与 Railway 的 SEMA_ADMIN_USERS 一致）。", "error");
   }
 }
 

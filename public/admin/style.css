@@ -180,9 +180,48 @@ select:focus {
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 18px;
+  flex-wrap: wrap;
 }
 
-.month-picker {
+.toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.period-toggle {
+  display: flex;
+  gap: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 3px;
+}
+
+.period-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+.period-option input {
+  width: auto;
+  margin: 0;
+}
+
+.period-option:has(input:checked) {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.period-picker {
   flex-direction: row;
   align-items: center;
   gap: 10px;
@@ -191,14 +230,6 @@ select:focus {
 .last-updated {
   color: var(--muted);
   font-size: 0.82rem;
-}
-
-.pricing-hint {
-  color: var(--muted);
-  font-size: 0.78rem;
-  max-width: 420px;
-  text-align: right;
-  line-height: 1.4;
 }
 
 .summary-cards {

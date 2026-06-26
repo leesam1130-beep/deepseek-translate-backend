@@ -43,9 +43,16 @@ function ensureDir() {
   if (!existsSync(USAGE_DIR)) mkdirSync(USAGE_DIR, { recursive: true });
 }
 
-function currentMonthKey() {
-  const d = new Date();
+function currentMonthKey(d = new Date()) {
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+function currentDayKey(d = new Date()) {
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
+}
+
+function monthFromDay(day) {
+  return String(day || "").slice(0, 7);
 }
 
 function parseEnvQuotas() {
@@ -78,10 +85,13 @@ const ALLOWED_USERS = parseAllowedUsers();
 
 function loadStore() {
   try {
-    if (!existsSync(USAGE_FILE)) return { months: {} };
-    return JSON.parse(readFileSync(USAGE_FILE, "utf8"));
+    if (!existsSync(USAGE_FILE)) return { months: {}, days: {} };
+    const store = JSON.parse(readFileSync(USAGE_FILE, "utf8"));
+    if (!store.days) store.days = {};
+    if (!store.months) store.months = {};
+    return store;
   } catch {
-    return { months: {} };
+    return { months: {}, days: {} };
   }
 }
 
@@ -158,20 +168,24 @@ export function getUserQuota(user) {
   return info.unlimited ? 0 : info.effectiveQuota;
 }
 
-function enrichUserRow(user, stats, month) {
+function enrichUserRow(user, stats, { month, day = null } = {}) {
   const quotaInfo = getUserQuotaInfo(user);
-  const totalTokens = stats.totalTokens || 0;
+  const monthKey = day ? monthFromDay(day) : month;
+  const store = loadStore();
+  const monthlyStats = store.months?.[monthKey]?.[user] || emptyUserStats();
+  const totalTokensForQuota = monthlyStats.totalTokens || 0;
   const quota = quotaInfo.unlimited ? null : quotaInfo.effectiveQuota;
   return {
     user,
-    month,
+    month: monthKey,
+    day,
     ...stats,
     costCny: resolveRowCost(stats),
     quota,
     unlimited: quotaInfo.unlimited,
     quotaSource: quotaInfo.source,
-    remaining: quota != null && quota > 0 ? Math.max(0, quota - totalTokens) : null,
-    quotaExceeded: quota != null && quota > 0 && totalTokens >= quota,
+    remaining: quota != null && quota > 0 ? Math.max(0, quota - totalTokensForQuota) : null,
+    quotaExceeded: quota != null && quota > 0 && totalTokensForQuota >= quota,
     whitelisted: ALLOWED_USERS.includes(user)
   };
 }
@@ -181,40 +195,49 @@ export function getUserUsage(user) {
   const store = loadStore();
   const monthData = store.months?.[month] || {};
   const stats = monthData[user] || emptyUserStats();
-  return enrichUserRow(user, stats, month);
+  return enrichUserRow(user, stats, { month });
+}
+
+function applyUsageToBucket(bucket, { route, inputTokens, outputTokens, inputCacheHitTokens, inputCacheMissTokens, totalTokens, costCny, provider, model }) {
+  bucket.requests += 1;
+  if (!bucket.byRoute[route]) {
+    bucket.byRoute[route] = { requests: 0, totalTokens: 0, costCny: 0 };
+  }
+  bucket.byRoute[route].requests += 1;
+
+  if (totalTokens > 0 || costCny > 0) {
+    bucket.totalTokens += totalTokens;
+    bucket.inputTokens += inputTokens;
+    bucket.outputTokens += outputTokens;
+    bucket.inputCacheHitTokens = (bucket.inputCacheHitTokens || 0) + inputCacheHitTokens;
+    bucket.inputCacheMissTokens = (bucket.inputCacheMissTokens || 0) + inputCacheMissTokens;
+    bucket.costCny = (bucket.costCny || 0) + costCny;
+    bucket.byRoute[route].totalTokens += totalTokens;
+    bucket.byRoute[route].costCny = (bucket.byRoute[route].costCny || 0) + costCny;
+  }
+  if (provider) bucket.lastProvider = provider;
+  if (model) bucket.lastModel = model;
+  bucket.updatedAt = new Date().toISOString();
 }
 
 export function recordUserUsage(user, { route, usage, provider, model }) {
   if (!user) return;
   const billed = computeCostFromUsage(usage || {}, provider || "deepseek");
-  const { inputTokens, outputTokens, inputCacheHitTokens, inputCacheMissTokens, totalTokens, costCny } = billed;
+  const payload = { route, provider, model, ...billed };
 
-  const month = currentMonthKey();
+  const now = new Date();
+  const month = currentMonthKey(now);
+  const day = currentDayKey(now);
   const store = loadStore();
   if (!store.months) store.months = {};
+  if (!store.days) store.days = {};
   if (!store.months[month]) store.months[month] = {};
+  if (!store.days[day]) store.days[day] = {};
   if (!store.months[month][user]) store.months[month][user] = emptyUserStats();
+  if (!store.days[day][user]) store.days[day][user] = emptyUserStats();
 
-  const u = store.months[month][user];
-  u.requests += 1;
-  if (!u.byRoute[route]) {
-    u.byRoute[route] = { requests: 0, totalTokens: 0, costCny: 0 };
-  }
-  u.byRoute[route].requests += 1;
-
-  if (totalTokens > 0 || costCny > 0) {
-    u.totalTokens += totalTokens;
-    u.inputTokens += inputTokens;
-    u.outputTokens += outputTokens;
-    u.inputCacheHitTokens = (u.inputCacheHitTokens || 0) + inputCacheHitTokens;
-    u.inputCacheMissTokens = (u.inputCacheMissTokens || 0) + inputCacheMissTokens;
-    u.costCny = (u.costCny || 0) + costCny;
-    u.byRoute[route].totalTokens += totalTokens;
-    u.byRoute[route].costCny = (u.byRoute[route].costCny || 0) + costCny;
-  }
-  if (provider) u.lastProvider = provider;
-  if (model) u.lastModel = model;
-  u.updatedAt = new Date().toISOString();
+  applyUsageToBucket(store.months[month][user], payload);
+  applyUsageToBucket(store.days[day][user], payload);
 
   saveStore(store);
 }
@@ -234,27 +257,40 @@ export function checkUserQuota(user) {
   return { ok: true, usage };
 }
 
-function listKnownUsers(month) {
+function listKnownUsers({ month, day } = {}) {
   const names = new Set();
   for (const u of ALLOWED_USERS) names.add(u);
   const store = loadStore();
-  for (const u of Object.keys(store.months?.[month] || {})) names.add(u);
   const qStore = loadQuotaStore();
   for (const u of Object.keys(qStore.users || {})) names.add(u);
+
+  if (day) {
+    for (const u of Object.keys(store.days?.[day] || {})) names.add(u);
+  } else {
+    const m = month || currentMonthKey();
+    for (const u of Object.keys(store.months?.[m] || {})) names.add(u);
+  }
   return Array.from(names).sort((a, b) => a.localeCompare(b, "zh-CN"));
 }
 
-export function listAllUsage({ month = currentMonthKey() } = {}) {
+export function listAllUsage({ month, day } = {}) {
   const store = loadStore();
-  const monthData = store.months?.[month] || {};
-  return listKnownUsers(month).map((user) => {
-    const stats = monthData[user] || emptyUserStats();
-    return enrichUserRow(user, stats, month);
-  });
+
+  if (day) {
+    const dayData = store.days?.[day] || {};
+    return listKnownUsers({ day }).map((user) =>
+      enrichUserRow(user, dayData[user] || emptyUserStats(), { month: monthFromDay(day), day })
+    );
+  }
+
+  const m = month || currentMonthKey();
+  const monthData = store.months?.[m] || {};
+  return listKnownUsers({ month: m }).map((user) =>
+    enrichUserRow(user, monthData[user] || emptyUserStats(), { month: m })
+  );
 }
 
-export function getUsageOverview({ month = currentMonthKey() } = {}) {
-  const users = listAllUsage({ month });
+function aggregateOverview(users, meta) {
   const totals = users.reduce(
     (acc, u) => {
       acc.totalTokens += u.totalTokens || 0;
@@ -278,7 +314,7 @@ export function getUsageOverview({ month = currentMonthKey() } = {}) {
   );
   totals.costCny = Math.round(totals.costCny * 1_000_000) / 1_000_000;
   return {
-    month,
+    ...meta,
     userCount: users.length,
     activeUserCount: users.filter((u) => (u.requests || 0) > 0).length,
     whitelistedCount: ALLOWED_USERS.length,
@@ -287,9 +323,33 @@ export function getUsageOverview({ month = currentMonthKey() } = {}) {
   };
 }
 
+export function getUsageOverview({ month, day } = {}) {
+  if (day) {
+    const users = listAllUsage({ day });
+    return aggregateOverview(users, {
+      period: "day",
+      day,
+      month: monthFromDay(day)
+    });
+  }
+
+  const m = month || currentMonthKey();
+  const users = listAllUsage({ month: m });
+  return aggregateOverview(users, {
+    period: "month",
+    month: m,
+    day: null
+  });
+}
+
 export function listAvailableMonths() {
   const store = loadStore();
   return Object.keys(store.months || {}).sort().reverse();
+}
+
+export function listAvailableDays() {
+  const store = loadStore();
+  return Object.keys(store.days || {}).sort().reverse();
 }
 
 export function setUserQuota(user, { quota, unlimited } = {}) {
@@ -332,11 +392,21 @@ export function adjustUserQuota(user, delta) {
   return getUserQuotaInfo(user);
 }
 
-export function resetUserUsage(user, month = currentMonthKey()) {
+export function resetUserUsage(user, { month, day } = {}) {
   if (!user) throw new Error("USER_REQUIRED");
   const store = loadStore();
-  if (store.months?.[month]?.[user]) {
-    delete store.months[month][user];
+
+  if (day) {
+    if (store.days?.[day]?.[user]) {
+      delete store.days[day][user];
+      saveStore(store);
+    }
+    return enrichUserRow(user, emptyUserStats(), { month: monthFromDay(day), day });
+  }
+
+  const m = month || currentMonthKey();
+  if (store.months?.[m]?.[user]) {
+    delete store.months[m][user];
     saveStore(store);
   }
   return getUserUsage(user);

@@ -1,5 +1,6 @@
 const STORAGE_BACKEND = "sema_admin_backend";
 const STORAGE_ADMIN_USER = "sema_admin_user";
+const STORAGE_PERIOD_MODE = "sema_admin_period_mode";
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -7,8 +8,9 @@ let allUsers = [];
 let sortKey = "totalTokens";
 let sortDir = "desc";
 let selectedMonth = "";
+let selectedDay = "";
+let periodMode = "month";
 let editingUser = null;
-let pricingInfo = null;
 
 function fmt(n) {
   if (n == null || n === "") return "—";
@@ -74,6 +76,23 @@ function currentMonthKey() {
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
+function currentDayKey() {
+  const d = new Date();
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
+}
+
+function getPeriodMode() {
+  const checked = document.querySelector('input[name="periodMode"]:checked');
+  return checked?.value === "day" ? "day" : "month";
+}
+
+function updatePeriodPickerVisibility() {
+  periodMode = getPeriodMode();
+  localStorage.setItem(STORAGE_PERIOD_MODE, periodMode);
+  $("#monthPickerWrap").classList.toggle("hidden", periodMode === "day");
+  $("#dayPickerWrap").classList.toggle("hidden", periodMode === "month");
+}
+
 async function adminFetch(path, { method = "GET", body } = {}) {
   const base = getBackendBase();
   if (!base) throw new Error("请先填写后端地址（连接设置）");
@@ -89,9 +108,15 @@ async function adminFetch(path, { method = "GET", body } = {}) {
   return data;
 }
 
-async function fetchUsage(month) {
-  const url = `/api/admin/usage${month ? `?month=${encodeURIComponent(month)}` : ""}`;
-  return adminFetch(url);
+async function fetchUsage() {
+  periodMode = getPeriodMode();
+  const params = new URLSearchParams();
+  if (periodMode === "day") {
+    params.set("day", $("#selectDay").value || selectedDay || currentDayKey());
+  } else {
+    params.set("month", $("#selectMonth").value || selectedMonth || currentMonthKey());
+  }
+  return adminFetch(`/api/admin/usage?${params.toString()}`);
 }
 
 async function setQuota(user, payload) {
@@ -108,20 +133,26 @@ async function adjustQuota(user, delta) {
   });
 }
 
-async function resetUsage(user, month) {
+async function resetUsage(user) {
+  periodMode = getPeriodMode();
+  const body =
+    periodMode === "day"
+      ? { day: $("#selectDay").value || selectedDay || currentDayKey() }
+      : { month: $("#selectMonth").value || selectedMonth || currentMonthKey() };
   return adminFetch(`/api/admin/users/${encodeURIComponent(user)}/usage/reset`, {
     method: "POST",
-    body: month ? { month } : {}
+    body
   });
 }
 
 function renderSummary(overview) {
+  const periodLabel = periodMode === "day" ? "当日" : "当月";
   const cards = [
-    { label: "总费用", value: fmtMoney(overview.costCny), isMoney: true },
+    { label: `${periodLabel}总费用`, value: fmtMoney(overview.costCny), isMoney: true },
     { label: "用户数", value: fmt(overview.userCount) },
     { label: "活跃用户", value: fmt(overview.activeUserCount) },
-    { label: "总请求", value: fmt(overview.requests) },
-    { label: "总 Token", value: fmt(overview.totalTokens) },
+    { label: `${periodLabel}请求`, value: fmt(overview.requests) },
+    { label: `${periodLabel}Token`, value: fmt(overview.totalTokens) },
     { label: "输入命中", value: fmt(overview.inputCacheHitTokens) },
     { label: "输入未命中", value: fmt(overview.inputCacheMissTokens) },
     { label: "输出 Token", value: fmt(overview.outputTokens) }
@@ -138,23 +169,19 @@ function renderSummary(overview) {
     .join("");
 }
 
-function renderPricingHint(pricing) {
-  const el = $("#pricingHint");
-  if (!pricing?.deepseek) {
-    el.textContent = "";
-    return;
-  }
-  const d = pricing.deepseek;
-  el.textContent =
-    `${pricing.modelLabel || "DeepSeek"}：输入命中 ¥${d.inputHitPerM}/M · 未命中 ¥${d.inputMissPerM}/M · 输出 ¥${d.outputPerM}/M`;
+function renderQuotaCell(user) {
+  if (user.unlimited) return '<span class="badge badge-muted">无限制</span>';
+  if (!user.quota || user.quota <= 0) return "—";
+  const used = user.remaining != null ? user.quota - user.remaining : user.totalTokens;
+  const pct = Math.min(100, Math.round((used / user.quota) * 100));
+  const cls = pct >= 100 ? "over" : pct >= 80 ? "warn" : "";
+  const note = periodMode === "day" ? ' <span class="badge badge-muted" title="配额按整月计算">月</span>' : "";
+  return `
+    <div>
+      <span class="quota-bar"><span class="quota-bar-fill ${cls}" style="width:${pct}%"></span></span>
+      ${pct}%${note}
+    </div>`;
 }
-
-function quotaPercent(user) {
-  if (user.unlimited || !user.quota || user.quota <= 0) return null;
-  return Math.min(100, Math.round((user.totalTokens / user.quota) * 100));
-}
-
-function quotaSourceLabel(source) {
   if (source === "panel") return '<span class="badge badge-info">面板</span>';
   if (source === "env") return '<span class="badge badge-warn">环境变量</span>';
   return "";
@@ -175,10 +202,11 @@ function renderQuotaCell(user) {
   const pct = quotaPercent(user);
   if (pct == null) return "—";
   const cls = pct >= 100 ? "over" : pct >= 80 ? "warn" : "";
+  const note = periodMode === "day" ? '<span class="badge badge-muted" title="配额按整月计算">月</span>' : "";
   return `
     <div>
       <span class="quota-bar"><span class="quota-bar-fill ${cls}" style="width:${pct}%"></span></span>
-      ${pct}%
+      ${pct}% ${note}
     </div>`;
 }
 
@@ -261,21 +289,45 @@ function fillMonthSelect(availableMonths, current) {
   selectedMonth = current;
 }
 
+function fillDayInput(availableDays, current) {
+  const input = $("#selectDay");
+  const days = [...new Set([current, ...availableDays])].filter(Boolean).sort().reverse();
+  input.value = current || currentDayKey();
+  input.min = days.length ? days[days.length - 1] : undefined;
+  input.max = days.length ? days[0] : undefined;
+  selectedDay = input.value;
+}
+
 async function loadData() {
   hideStatus();
+  updatePeriodPickerVisibility();
   $("#userTableBody").innerHTML = '<tr><td colspan="11" class="empty">正在加载…</td></tr>';
 
   try {
-    const month = $("#selectMonth").value || selectedMonth || currentMonthKey();
-    const data = await fetchUsage(month);
+    const data = await fetchUsage();
     allUsers = data.users || [];
-    pricingInfo = data.pricing || null;
-    selectedMonth = data.month;
+    periodMode = data.period || getPeriodMode();
+    selectedMonth = data.month || selectedMonth;
+    selectedDay = data.day || selectedDay;
+
     fillMonthSelect(data.availableMonths || [], data.month);
+    fillDayInput(data.availableDays || [], data.day || currentDayKey());
+
+    if (data.period === "day") {
+      document.querySelector('input[name="periodMode"][value="day"]').checked = true;
+    } else {
+      document.querySelector('input[name="periodMode"][value="month"]').checked = true;
+    }
+    updatePeriodPickerVisibility();
+
     renderSummary(data.overview || {});
-    renderPricingHint(pricingInfo);
     renderTable(allUsers);
-    $("#lastUpdated").textContent = `更新于 ${new Date().toLocaleString("zh-CN", { hour12: false })}`;
+
+    const periodText =
+      periodMode === "day"
+        ? `按日 ${data.day || selectedDay}`
+        : `按月 ${data.month || selectedMonth}`;
+    $("#lastUpdated").textContent = `${periodText} · 更新于 ${new Date().toLocaleString("zh-CN", { hour12: false })}`;
   } catch (err) {
     showStatus(err.message || String(err), "error");
     $("#summaryCards").innerHTML = "";
@@ -285,7 +337,7 @@ async function loadData() {
 
 function openQuotaDialog(user) {
   editingUser = user;
-  $("#quotaDialogUser").textContent = `用户：${user}`;
+  $("#quotaDialogUser").textContent = `用户：${user.user || user}`;
   $("#quotaUnlimited").checked = !!user.unlimited;
   $("#quotaInput").value = user.unlimited ? "" : user.quota || "";
   $("#quotaInput").disabled = !!user.unlimited;
@@ -327,11 +379,14 @@ function bindTableActions() {
     }
 
     if (action === "reset") {
-      const month = selectedMonth || currentMonthKey();
-      if (!confirm(`确定重置「${userName}」在 ${month} 的用量？配额不变。`)) return;
+      const label =
+        periodMode === "day"
+          ? ` ${$("#selectDay").value || selectedDay}`
+          : ` ${$("#selectMonth").value || selectedMonth}`;
+      if (!confirm(`确定重置「${userName}」在${label} 的用量？配额不变。`)) return;
       try {
-        await resetUsage(userName, month);
-        showStatus(`已重置 ${userName} 本月用量`, "success");
+        await resetUsage(userName);
+        showStatus(`已重置 ${userName} 用量`, "success");
         await loadData();
       } catch (err) {
         showStatus(err.message, "error");
@@ -405,6 +460,13 @@ function initSettings() {
   $("#inputBackend").value = localStorage.getItem(STORAGE_BACKEND) || "";
   $("#inputAdminUser").value = localStorage.getItem(STORAGE_ADMIN_USER) || "";
 
+  const savedMode = localStorage.getItem(STORAGE_PERIOD_MODE);
+  if (savedMode === "day") {
+    document.querySelector('input[name="periodMode"][value="day"]').checked = true;
+  }
+  $("#selectDay").value = currentDayKey();
+  updatePeriodPickerVisibility();
+
   if (!localStorage.getItem(STORAGE_BACKEND) && !location.pathname.startsWith("/admin")) {
     $("#settingsPanel").classList.remove("hidden");
   } else if (!getAdminUser()) {
@@ -431,7 +493,13 @@ function bindEvents() {
   });
 
   $("#btnRefresh").addEventListener("click", loadData);
+
+  document.querySelectorAll('input[name="periodMode"]').forEach((el) => {
+    el.addEventListener("change", loadData);
+  });
+
   $("#selectMonth").addEventListener("change", loadData);
+  $("#selectDay").addEventListener("change", loadData);
   $("#inputSearch").addEventListener("input", () => renderTable(allUsers));
 
   document.querySelectorAll("th[data-sort]").forEach((th) => {

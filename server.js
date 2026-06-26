@@ -35,6 +35,7 @@ import {
   getUserUsage,
   getUsageOverview,
   listAvailableMonths,
+  listAvailableDays,
   getUsageStorageInfo,
   setUserQuota,
   adjustUserQuota,
@@ -42,7 +43,6 @@ import {
   clearUserQuotaOverride,
   getUserQuotaInfo
 } from "./usage-store.js";
-import { PRICING_META } from "./pricing.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -1111,11 +1111,14 @@ function requireAdmin(req, res, next) {
 }
 
 app.get("/api/admin/usage", requireUser, requireAdmin, (req, res) => {
+  const day = String(req.query.day || "").trim() || undefined;
   const month = String(req.query.month || "").trim() || undefined;
-  const overview = getUsageOverview({ month });
+  const overview = getUsageOverview(day ? { day } : { month });
   res.json({
     ok: true,
+    period: overview.period,
     month: overview.month,
+    day: overview.day,
     overview: {
       userCount: overview.userCount,
       activeUserCount: overview.activeUserCount,
@@ -1123,18 +1126,14 @@ app.get("/api/admin/usage", requireUser, requireAdmin, (req, res) => {
       totalTokens: overview.totalTokens,
       inputTokens: overview.inputTokens,
       outputTokens: overview.outputTokens,
-      requests: overview.requests
+      inputCacheHitTokens: overview.inputCacheHitTokens,
+      inputCacheMissTokens: overview.inputCacheMissTokens,
+      requests: overview.requests,
+      costCny: overview.costCny
     },
     users: overview.users,
     availableMonths: listAvailableMonths(),
-    pricing: {
-      currency: PRICING_META.currency,
-      symbol: PRICING_META.symbol,
-      modelLabel: PRICING_META.modelLabel,
-      deepseek: PRICING_META.deepseek,
-      openai: PRICING_META.openai,
-      note: "DeepSeek 按缓存命中/未命中分别计价；历史无缓存明细时按「全部未命中」估算"
-    }
+    availableDays: listAvailableDays()
   });
 });
 
@@ -1189,8 +1188,9 @@ app.post("/api/admin/users/:user/usage/reset", requireUser, requireAdmin, (req, 
     if (!user) return res.status(400).json({ ok: false, error: "USER_REQUIRED" });
 
     const month = String(req.body?.month || req.query?.month || "").trim() || undefined;
-    const usage = resetUserUsage(user, month);
-    res.json({ ok: true, user, month: usage.month, usage });
+    const day = String(req.body?.day || req.query?.day || "").trim() || undefined;
+    const usage = resetUserUsage(user, { month, day });
+    res.json({ ok: true, user, month: usage.month, day: usage.day || day || null, usage });
   } catch (err) {
     res.status(400).json({ ok: false, error: err.message || String(err) });
   }

@@ -44,12 +44,27 @@
     <section id="statusBar" class="status-bar hidden"></section>
 
     <section class="toolbar">
-      <label class="month-picker">
-        月份
-        <select id="selectMonth"></select>
-      </label>
+      <div class="toolbar-left">
+        <div class="period-toggle" role="group" aria-label="统计粒度">
+          <label class="period-option">
+            <input type="radio" name="periodMode" value="month" checked />
+            按月
+          </label>
+          <label class="period-option">
+            <input type="radio" name="periodMode" value="day" />
+            按日
+          </label>
+        </div>
+        <label id="monthPickerWrap" class="period-picker">
+          月份
+          <select id="selectMonth"></select>
+        </label>
+        <label id="dayPickerWrap" class="period-picker hidden">
+          日期
+          <input id="selectDay" type="date" />
+        </label>
+      </div>
       <span id="lastUpdated" class="last-updated"></span>
-      <span id="pricingHint" class="pricing-hint"></span>
     </section>
 
     <section id="summaryCards" class="summary-cards"></section>

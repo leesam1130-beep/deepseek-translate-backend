@@ -65,6 +65,9 @@ curl https://deepseek-translate-backend-production.up.railway.app/api/health
 | `GET /api/health` | 健康检查 + provider 模型目录 |
 | `GET /api/usage` | 当前用户本月用量（需 `X-SEMA-User` 头） |
 | `GET /api/admin/usage` | 所有用户用量（需 `SEMA_ADMIN_USERS` 授权） |
+| `PATCH /api/admin/users/:user/quota` | 设置配额 `{ "quota": 500000 }` 或 `{ "unlimited": true }` |
+| `POST /api/admin/users/:user/quota/adjust` | 充值/减配 `{ "delta": 100000 }` |
+| `POST /api/admin/users/:user/usage/reset` | 重置本月用量 `{ "month": "2026-06" }`（可选） |
 | `POST /api/translate` | 中文 → 客户语言 |
 | `POST /api/batch-translate-incoming` | 批量来信 → 中文 |
 
@@ -77,8 +80,9 @@ curl https://deepseek-translate-backend-production.up.railway.app/api/health
 ### 用户用量 / 配额
 
 - 每次翻译自动累计 token 到 `data/usage.json`（按月分桶）
+- 面板配额保存在 `data/quotas.json`（与用量同目录，需 Railway Volume）
 - Railway 生产环境请挂载 Volume 到 `/app/data`，详见 [RAILWAY-VOLUME.md](./RAILWAY-VOLUME.md)
-- `SEMA_USER_QUOTAS` 设置月度上限，超额返回 `429 QUOTA_EXCEEDED`
+- 配额优先级：**面板 quotas.json > 环境变量 `SEMA_USER_QUOTAS`**
 - 后续可迁移到数据库，接口不变
 
 ## 与 GWELL 后端的区别

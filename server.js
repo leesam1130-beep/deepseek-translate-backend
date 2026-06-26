@@ -35,7 +35,12 @@ import {
   getUserUsage,
   getUsageOverview,
   listAvailableMonths,
-  getUsageStorageInfo
+  getUsageStorageInfo,
+  setUserQuota,
+  adjustUserQuota,
+  resetUserUsage,
+  clearUserQuotaOverride,
+  getUserQuotaInfo
 } from "./usage-store.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -1111,6 +1116,7 @@ app.get("/api/admin/usage", requireUser, requireAdmin, (req, res) => {
     overview: {
       userCount: overview.userCount,
       activeUserCount: overview.activeUserCount,
+      whitelistedCount: overview.whitelistedCount,
       totalTokens: overview.totalTokens,
       inputTokens: overview.inputTokens,
       outputTokens: overview.outputTokens,
@@ -1119,6 +1125,70 @@ app.get("/api/admin/usage", requireUser, requireAdmin, (req, res) => {
     users: overview.users,
     availableMonths: listAvailableMonths()
   });
+});
+
+function adminUserParam(req) {
+  return decodeURIComponent(String(req.params.user || "").trim());
+}
+
+app.patch("/api/admin/users/:user/quota", requireUser, requireAdmin, (req, res) => {
+  try {
+    const user = adminUserParam(req);
+    if (!user) return res.status(400).json({ ok: false, error: "USER_REQUIRED" });
+
+    const { quota, unlimited, clearOverride } = req.body || {};
+
+    let info;
+    if (clearOverride === true) {
+      info = clearUserQuotaOverride(user);
+    } else if (unlimited === true) {
+      info = setUserQuota(user, { unlimited: true });
+    } else if (typeof quota === "number") {
+      info = setUserQuota(user, { quota });
+    } else {
+      return res.status(400).json({ ok: false, error: "INVALID_BODY", hint: "传 quota（数字）、unlimited: true 或 clearOverride: true" });
+    }
+
+    res.json({ ok: true, user, quota: info });
+  } catch (err) {
+    res.status(400).json({ ok: false, error: err.message || String(err) });
+  }
+});
+
+app.post("/api/admin/users/:user/quota/adjust", requireUser, requireAdmin, (req, res) => {
+  try {
+    const user = adminUserParam(req);
+    if (!user) return res.status(400).json({ ok: false, error: "USER_REQUIRED" });
+
+    const delta = Number(req.body?.delta);
+    if (!Number.isFinite(delta) || delta === 0) {
+      return res.status(400).json({ ok: false, error: "INVALID_DELTA", hint: "delta 须为非零数字，正数充值、负数减配" });
+    }
+
+    const info = adjustUserQuota(user, delta);
+    res.json({ ok: true, user, delta, quota: info });
+  } catch (err) {
+    res.status(400).json({ ok: false, error: err.message || String(err) });
+  }
+});
+
+app.post("/api/admin/users/:user/usage/reset", requireUser, requireAdmin, (req, res) => {
+  try {
+    const user = adminUserParam(req);
+    if (!user) return res.status(400).json({ ok: false, error: "USER_REQUIRED" });
+
+    const month = String(req.body?.month || req.query?.month || "").trim() || undefined;
+    const usage = resetUserUsage(user, month);
+    res.json({ ok: true, user, month: usage.month, usage });
+  } catch (err) {
+    res.status(400).json({ ok: false, error: err.message || String(err) });
+  }
+});
+
+app.get("/api/admin/users/:user", requireUser, requireAdmin, (req, res) => {
+  const user = adminUserParam(req);
+  if (!user) return res.status(400).json({ ok: false, error: "USER_REQUIRED" });
+  res.json({ ok: true, user, usage: getUserUsage(user), quota: getUserQuotaInfo(user) });
 });
 
 // === 主路由 1：outbound 中→客户语言 ===

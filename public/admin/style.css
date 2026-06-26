@@ -361,6 +361,94 @@ tbody tr:hover {
   white-space: nowrap;
 }
 
+.action-btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.btn-sm {
+  padding: 5px 9px;
+  font-size: 0.75rem;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.btn-sm:hover {
+  background: var(--border);
+}
+
+.btn-sm.danger {
+  border-color: rgba(239, 68, 68, 0.4);
+  color: #fca5a5;
+}
+
+.btn-sm.danger:hover {
+  background: rgba(239, 68, 68, 0.15);
+}
+
+.badge-info {
+  background: rgba(59, 130, 246, 0.15);
+  color: #93c5fd;
+}
+
+.badge-warn {
+  background: rgba(245, 158, 11, 0.15);
+  color: #fcd34d;
+}
+
+.modal {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0;
+  background: var(--surface);
+  color: var(--text);
+  max-width: 420px;
+  width: calc(100% - 32px);
+  box-shadow: var(--shadow);
+}
+
+.modal::backdrop {
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.modal form {
+  padding: 20px;
+}
+
+.modal h2 {
+  margin: 0 0 8px;
+  font-size: 1.1rem;
+}
+
+.modal-user {
+  margin: 0 0 16px;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.modal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.checkbox-row {
+  flex-direction: row !important;
+  align-items: center;
+  gap: 8px !important;
+  margin-bottom: 12px;
+  color: var(--text) !important;
+}
+
+.checkbox-row input {
+  width: auto;
+}
+
 @media (max-width: 720px) {
   .form-grid {
     grid-template-columns: 1fr;

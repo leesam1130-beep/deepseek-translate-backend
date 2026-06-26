@@ -1,9 +1,12 @@
 /**
- * Per-user token usage tracking (file-backed, ready for DB migration).
+ * Per-user token usage + quota tracking (file-backed, ready for DB migration).
  *
  * Env:
- *   SEMA_USER_QUOTAS  JSON map or "user1:100000,user2:50000" (monthly token limit; 0 = unlimited)
- *   SEMA_USAGE_DIR    directory for usage.json (default: ./data)
+ *   SEMA_USER_QUOTAS     JSON map or "user1:100000,user2:50000" (fallback quota; 0 = unlimited)
+ *   SEMA_ALLOWED_USERS   comma list — shown in admin even with zero usage
+ *   SEMA_USAGE_DIR       directory for usage.json / quotas.json (default: ./data)
+ *
+ * Quota priority: quotas.json (admin panel) > SEMA_USER_QUOTAS (env)
  */
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
 import { join, dirname } from "path";
@@ -22,15 +25,21 @@ function resolveUsageDir() {
 
 const USAGE_DIR = resolveUsageDir();
 const USAGE_FILE = join(USAGE_DIR, "usage.json");
+const QUOTAS_FILE = join(USAGE_DIR, "quotas.json");
 
 export function getUsageStorageInfo() {
   return {
     dir: USAGE_DIR,
     file: USAGE_FILE,
+    quotasFile: QUOTAS_FILE,
     persistent: !!process.env.RAILWAY_VOLUME_MOUNT_PATH || !!process.env.SEMA_USAGE_DIR,
     volumeMounted: !!process.env.RAILWAY_VOLUME_MOUNT_PATH,
     volumeName: process.env.RAILWAY_VOLUME_NAME || null
   };
+}
+
+function ensureDir() {
+  if (!existsSync(USAGE_DIR)) mkdirSync(USAGE_DIR, { recursive: true });
 }
 
 function currentMonthKey() {
@@ -38,7 +47,7 @@ function currentMonthKey() {
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
-function parseQuotas() {
+function parseEnvQuotas() {
   const raw = String(process.env.SEMA_USER_QUOTAS || process.env.GWELL_USER_QUOTAS || "").trim();
   if (!raw) return new Map();
   try {
@@ -47,7 +56,7 @@ function parseQuotas() {
       return new Map(Object.entries(obj).map(([k, v]) => [k, Number(v) || 0]));
     }
   } catch {
-    /* fall through to comma format */
+    /* fall through */
   }
   const map = new Map();
   for (const part of raw.split(",")) {
@@ -57,7 +66,14 @@ function parseQuotas() {
   return map;
 }
 
-const USER_QUOTAS = parseQuotas();
+function parseAllowedUsers() {
+  const raw = String(process.env.SEMA_ALLOWED_USERS || process.env.GWELL_ALLOWED_USERS || "").trim();
+  if (!raw) return [];
+  return raw.split(",").map((s) => s.trim()).filter(Boolean);
+}
+
+const ENV_QUOTAS = parseEnvQuotas();
+const ALLOWED_USERS = parseAllowedUsers();
 
 function loadStore() {
   try {
@@ -69,8 +85,22 @@ function loadStore() {
 }
 
 function saveStore(store) {
-  if (!existsSync(USAGE_DIR)) mkdirSync(USAGE_DIR, { recursive: true });
+  ensureDir();
   writeFileSync(USAGE_FILE, JSON.stringify(store, null, 2), "utf8");
+}
+
+function loadQuotaStore() {
+  try {
+    if (!existsSync(QUOTAS_FILE)) return { users: {} };
+    return JSON.parse(readFileSync(QUOTAS_FILE, "utf8"));
+  } catch {
+    return { users: {} };
+  }
+}
+
+function saveQuotaStore(store) {
+  ensureDir();
+  writeFileSync(QUOTAS_FILE, JSON.stringify(store, null, 2), "utf8");
 }
 
 function emptyUserStats() {
@@ -83,9 +113,50 @@ function emptyUserStats() {
   };
 }
 
+/** Panel override > env > unlimited */
+export function getUserQuotaInfo(user) {
+  if (!user) {
+    return { effectiveQuota: 0, unlimited: true, source: "none", panelQuota: null };
+  }
+
+  const panel = loadQuotaStore().users?.[user];
+  if (panel) {
+    if (panel.unlimited) {
+      return { effectiveQuota: 0, unlimited: true, source: "panel", panelQuota: null };
+    }
+    if (typeof panel.quota === "number" && panel.quota > 0) {
+      return { effectiveQuota: panel.quota, unlimited: false, source: "panel", panelQuota: panel.quota };
+    }
+  }
+
+  const envQ = ENV_QUOTAS.get(user) ?? 0;
+  if (envQ > 0) {
+    return { effectiveQuota: envQ, unlimited: false, source: "env", panelQuota: null };
+  }
+
+  return { effectiveQuota: 0, unlimited: true, source: "none", panelQuota: null };
+}
+
 export function getUserQuota(user) {
-  if (!user) return 0;
-  return USER_QUOTAS.get(user) ?? 0;
+  const info = getUserQuotaInfo(user);
+  return info.unlimited ? 0 : info.effectiveQuota;
+}
+
+function enrichUserRow(user, stats, month) {
+  const quotaInfo = getUserQuotaInfo(user);
+  const totalTokens = stats.totalTokens || 0;
+  const quota = quotaInfo.unlimited ? null : quotaInfo.effectiveQuota;
+  return {
+    user,
+    month,
+    ...stats,
+    quota,
+    unlimited: quotaInfo.unlimited,
+    quotaSource: quotaInfo.source,
+    remaining: quota != null && quota > 0 ? Math.max(0, quota - totalTokens) : null,
+    quotaExceeded: quota != null && quota > 0 && totalTokens >= quota,
+    whitelisted: ALLOWED_USERS.includes(user)
+  };
 }
 
 export function getUserUsage(user) {
@@ -93,15 +164,7 @@ export function getUserUsage(user) {
   const store = loadStore();
   const monthData = store.months?.[month] || {};
   const stats = monthData[user] || emptyUserStats();
-  const quota = getUserQuota(user);
-  return {
-    user,
-    month,
-    ...stats,
-    quota: quota || null,
-    remaining: quota > 0 ? Math.max(0, quota - stats.totalTokens) : null,
-    quotaExceeded: quota > 0 && stats.totalTokens >= quota
-  };
+  return enrichUserRow(user, stats, month);
 }
 
 export function recordUserUsage(user, { route, usage, provider, model }) {
@@ -137,33 +200,36 @@ export function recordUserUsage(user, { route, usage, provider, model }) {
 }
 
 export function checkUserQuota(user) {
-  const quota = getUserQuota(user);
-  if (!quota || quota <= 0) return { ok: true };
+  const info = getUserQuotaInfo(user);
+  if (info.unlimited) return { ok: true };
   const usage = getUserUsage(user);
-  if (usage.totalTokens >= quota) {
+  if (usage.totalTokens >= info.effectiveQuota) {
     return {
       ok: false,
       error: "QUOTA_EXCEEDED",
-      hint: `本月用量已达上限（${quota.toLocaleString()} tokens），请联系管理员扩容`,
+      hint: `本月用量已达上限（${info.effectiveQuota.toLocaleString()} tokens），请联系管理员扩容`,
       usage
     };
   }
   return { ok: true, usage };
 }
 
+function listKnownUsers(month) {
+  const names = new Set();
+  for (const u of ALLOWED_USERS) names.add(u);
+  const store = loadStore();
+  for (const u of Object.keys(store.months?.[month] || {})) names.add(u);
+  const qStore = loadQuotaStore();
+  for (const u of Object.keys(qStore.users || {})) names.add(u);
+  return Array.from(names).sort((a, b) => a.localeCompare(b, "zh-CN"));
+}
+
 export function listAllUsage({ month = currentMonthKey() } = {}) {
   const store = loadStore();
   const monthData = store.months?.[month] || {};
-  return Object.entries(monthData).map(([user, stats]) => {
-    const quota = getUserQuota(user);
-    return {
-      user,
-      month,
-      ...stats,
-      quota: quota || null,
-      remaining: quota > 0 ? Math.max(0, quota - stats.totalTokens) : null,
-      quotaExceeded: quota > 0 && stats.totalTokens >= quota
-    };
+  return listKnownUsers(month).map((user) => {
+    const stats = monthData[user] || emptyUserStats();
+    return enrichUserRow(user, stats, month);
   });
 }
 
@@ -183,6 +249,7 @@ export function getUsageOverview({ month = currentMonthKey() } = {}) {
     month,
     userCount: users.length,
     activeUserCount: users.filter((u) => (u.requests || 0) > 0).length,
+    whitelistedCount: ALLOWED_USERS.length,
     ...totals,
     users: users.sort((a, b) => (b.totalTokens || 0) - (a.totalTokens || 0))
   };
@@ -193,8 +260,71 @@ export function listAvailableMonths() {
   return Object.keys(store.months || {}).sort().reverse();
 }
 
-if (USER_QUOTAS.size > 0) {
-  console.log(`[sema-backend] user quotas enabled for ${USER_QUOTAS.size} user(s)`);
+export function setUserQuota(user, { quota, unlimited } = {}) {
+  if (!user) throw new Error("USER_REQUIRED");
+
+  const store = loadQuotaStore();
+  if (!store.users) store.users = {};
+
+  if (unlimited === true) {
+    store.users[user] = {
+      unlimited: true,
+      quota: null,
+      updatedAt: new Date().toISOString(),
+      source: "panel"
+    };
+  } else if (typeof quota === "number" && quota > 0) {
+    store.users[user] = {
+      unlimited: false,
+      quota: Math.floor(quota),
+      updatedAt: new Date().toISOString(),
+      source: "panel"
+    };
+  } else {
+    throw new Error("INVALID_QUOTA");
+  }
+
+  saveQuotaStore(store);
+  return getUserQuotaInfo(user);
+}
+
+export function adjustUserQuota(user, delta) {
+  if (!user) throw new Error("USER_REQUIRED");
+  const d = Number(delta);
+  if (!Number.isFinite(d) || d === 0) throw new Error("INVALID_DELTA");
+
+  const info = getUserQuotaInfo(user);
+  const base = info.unlimited ? 0 : info.effectiveQuota;
+  const newQuota = Math.max(1, Math.floor(base + d));
+  setUserQuota(user, { quota: newQuota });
+  return getUserQuotaInfo(user);
+}
+
+export function resetUserUsage(user, month = currentMonthKey()) {
+  if (!user) throw new Error("USER_REQUIRED");
+  const store = loadStore();
+  if (store.months?.[month]?.[user]) {
+    delete store.months[month][user];
+    saveStore(store);
+  }
+  return getUserUsage(user);
+}
+
+export function clearUserQuotaOverride(user) {
+  if (!user) throw new Error("USER_REQUIRED");
+  const store = loadQuotaStore();
+  if (store.users?.[user]) {
+    delete store.users[user];
+    saveQuotaStore(store);
+  }
+  return getUserQuotaInfo(user);
+}
+
+if (ENV_QUOTAS.size > 0) {
+  console.log(`[sema-backend] env quotas for ${ENV_QUOTAS.size} user(s)`);
+}
+if (ALLOWED_USERS.length > 0) {
+  console.log(`[sema-backend] whitelist: ${ALLOWED_USERS.length} user(s)`);
 }
 
 const storage = getUsageStorageInfo();

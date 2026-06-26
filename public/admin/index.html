@@ -11,7 +11,7 @@
     <header class="header">
       <div class="header-left">
         <h1>SemaTranslate 用量管理</h1>
-        <p class="subtitle">查看每个用户的 Token 用量与配额</p>
+        <p class="subtitle">查看与管理每个用户的 Token 用量、配额</p>
       </div>
       <div class="header-actions">
         <button type="button" id="btnRefresh" class="btn btn-primary">刷新</button>
@@ -32,8 +32,8 @@
         </label>
       </div>
       <p class="hint">
-        请求头会带上 <code>X-SEMA-User</code>。Railway 需设置
-        <code>SEMA_ADMIN_USERS=你的用户名</code>。若从 <code>/admin</code> 打开可留空后端地址。
+        配额修改写入 Railway 持久化卷的 <code>quotas.json</code>，立即生效，无需 redeploy。
+        优先级：面板设置 &gt; 环境变量 <code>SEMA_USER_QUOTAS</code>。
       </p>
       <div class="settings-actions">
         <button type="button" id="btnSaveSettings" class="btn btn-primary">保存并加载</button>
@@ -71,15 +71,53 @@
               <th>用量</th>
               <th>路由分布</th>
               <th>最近更新</th>
+              <th>操作</th>
             </tr>
           </thead>
           <tbody id="userTableBody">
-            <tr><td colspan="9" class="empty">正在加载…</td></tr>
+            <tr><td colspan="10" class="empty">正在加载…</td></tr>
           </tbody>
         </table>
       </div>
     </section>
   </div>
+
+  <dialog id="quotaDialog" class="modal">
+    <form id="quotaForm" method="dialog">
+      <h2 id="quotaDialogTitle">编辑配额</h2>
+      <p class="modal-user" id="quotaDialogUser"></p>
+      <label class="checkbox-row">
+        <input type="checkbox" id="quotaUnlimited" />
+        无限制
+      </label>
+      <label>
+        月度 Token 上限
+        <input id="quotaInput" type="number" min="1" step="1000" placeholder="例如 500000" />
+      </label>
+      <p class="hint" id="quotaSourceHint"></p>
+      <div class="modal-actions">
+        <button type="submit" class="btn btn-primary">保存</button>
+        <button type="button" id="btnClearQuotaOverride" class="btn btn-ghost">恢复为环境变量</button>
+        <button type="button" id="btnCancelQuota" class="btn btn-ghost">取消</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="adjustDialog" class="modal">
+    <form id="adjustForm" method="dialog">
+      <h2>充值 / 减配</h2>
+      <p class="modal-user" id="adjustDialogUser"></p>
+      <label>
+        调整量（Token）
+        <input id="adjustDelta" type="number" step="10000" placeholder="正数充值，负数减配，如 100000" required />
+      </label>
+      <p class="hint">在当前配额基础上加减。若原为无限制，则从 0 起算新配额。</p>
+      <div class="modal-actions">
+        <button type="submit" class="btn btn-primary">确认</button>
+        <button type="button" id="btnCancelAdjust" class="btn btn-ghost">取消</button>
+      </div>
+    </form>
+  </dialog>
 
   <script src="app.js"></script>
 </body>
